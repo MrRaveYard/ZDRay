@@ -73,3 +73,13 @@ bool SurfaceClip::SampleIsInBounds(float x, float y) const
 	}
 	return false;
 }
+
+vec2 SurfaceClip::MoveSampleOriginToSurfaceBounds(float x, float y) const
+{
+	vec2 p = vec2((x / float(sampleWidth)) * boundsWidth + bounds.min.x + offsetW, (y / float(sampleHeight)) * boundsHeight + bounds.min.y + offsetH);
+
+
+	const vec2 taskPos = vec2((p.x - bounds.min.x - offsetW) * sampleWidth / boundsWidth, (p.y - bounds.min.y - offsetH) * sampleHeight / boundsHeight);
+
+	return taskPos;
+}

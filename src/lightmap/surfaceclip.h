@@ -23,4 +23,6 @@ public:
 
 	// Tolerates points close enough to the surface to avoid missing used samples
 	bool SampleIsInBounds(float x, float y) const;
+
+	vec2 MoveSampleOriginToSurfaceBounds(float x, float y) const;
 };

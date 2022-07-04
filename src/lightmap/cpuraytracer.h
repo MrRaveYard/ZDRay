@@ -9,6 +9,7 @@ class LevelMesh;
 struct CPUTraceTask
 {
 	int id, x, y;
+	vec2 rayStart;
 };
 
 struct CPULightInfo

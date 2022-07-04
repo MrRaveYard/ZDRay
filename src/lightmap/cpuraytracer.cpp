@@ -56,7 +56,7 @@ void CPURaytracer::RaytraceTask(const CPUTraceTask& task)
 	if (task.id >= 0)
 	{
 		Surface* surface = mesh->surfaces[task.id].get();
-		vec3 pos = surface->lightmapOrigin + surface->lightmapSteps[0] * ((float)task.x + 0.5f) + surface->lightmapSteps[1] * ((float)task.y + 0.5f);
+		vec3 pos = surface->lightmapOrigin + surface->lightmapSteps[0] * ((float)task.rayStart.x + 0.5f) + surface->lightmapSteps[1] * ((float)task.rayStart.y + 0.5f);
 		state.StartPosition = pos;
 		state.StartSurface = surface;
 	}
@@ -394,6 +394,7 @@ void CPURaytracer::CreateTasks(std::vector<CPUTraceTask>& tasks)
 						task.id = (int)i;
 						task.x = x;
 						task.y = y;
+						task.rayStart = surfaceClip.MoveSampleOriginToSurfaceBounds(float(x), float(y));
 						tasks.push_back(task);
 					}
 				}
