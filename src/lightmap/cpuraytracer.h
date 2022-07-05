@@ -93,6 +93,9 @@ private:
 
 	static void RunJob(int count, std::function<void(int i)> callback);
 
+	const int coverageSampleCount = 256;
+	const int bounceSampleCount = 0;
+
 	LevelMesh* mesh = nullptr;
 	std::vector<vec3> HemisphereVectors;
 	std::vector<CPULightInfo> Lights;

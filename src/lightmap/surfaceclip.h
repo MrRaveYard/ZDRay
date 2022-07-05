@@ -8,6 +8,8 @@ class SurfaceClip
 {
 	std::vector<vec2> vertices;
 
+	mat3 inverseProjection;
+
 	float sampleWidth;
 	float sampleHeight;
 
@@ -25,6 +27,8 @@ public:
 
 	// Task XY space. Tolerates points close enough to the surface to avoid missing used samples
 	bool SampleIsInBounds(float x, float y) const;
+	bool WorldPositionInBounds(const vec3& p) const;
 
 	vec2 MoveSampleOriginToSurfaceBounds(float x, float y) const;
+
 };

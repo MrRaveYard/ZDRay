@@ -233,25 +233,58 @@ void CPURaytracer::RunLightTrace(CPUTraceState& state)
 		float attenuation = 0.0f;
 		if (state.PassType == 0 && surface)
 		{
-			if (dot(normal, state.SunDir) > 0.0f)
+			//if (dot(normal, state.SunDir) > 0.0f)
 			{
 				vec3 e0 = normalize(cross(normal, std::abs(normal.x) < std::abs(normal.y) ? vec3(1.0f, 0.0f, 0.0f) : vec3(0.0f, 1.0f, 0.0f)));
 				vec3 e1 = cross(normal, e0);
 				e0 = cross(normal, e1);
 
+				SurfaceClip surfaceClip(surface);
+
+				uint32_t samples = 0;
 				for (uint32_t i = 0; i < state.SampleCount; i++)
 				{
 					vec2 offset = (Hammersley(i, state.SampleCount) - 0.5f) * float(surface->sampleDimension);
 					vec3 origin2 = origin + e0 * offset.x + e1 * offset.y;
 
-					vec3 start = origin2;
-					vec3 end = start + state.SunDir * dist;
-					LevelTraceHit hit = Trace(start, end);
-					if (hit.fraction < 1.0f && hit.hitSurface->bSky)
-						attenuation += 1.0f;
+
+					if (surfaceClip.WorldPositionInBounds(origin2))
+					{
+					//again:;
+						samples++;
+
+						//vec3 start = origin2;
+						//vec3 end = start + state.SunDir * dist;
+						//LevelTraceHit hit = Trace(start, end);
+						//if (hit.fraction < 1.0f && hit.hitSurface->bSky)
+							attenuation += 1.0f;
+					}
 				}
-				attenuation *= 1.0f / float(state.SampleCount);
-				incoming += state.SunColor * (attenuation * state.SunIntensity * incomingAttenuation);
+
+				if (samples == 0)
+				{
+					attenuation = 0.0;
+
+					incoming += vec3(1.0f, 0.0, 1.0f);
+				}
+				else if (samples == 1)
+				{
+					attenuation = 0.0;
+
+					incoming += vec3(0.0f, 0.0, 1.0f);
+				}
+				else if (samples < state.SampleCount / 2)
+				{
+					attenuation = 0.0;
+
+					incoming += vec3(0.0f, 1.0, 0.0f);
+				}
+				else
+				{
+					incoming += vec3(float(samples) / float(state.SampleCount));
+					//attenuation *= 1.0f / float(samples);
+					//incoming += state.SunColor * (attenuation * state.SunIntensity * incomingAttenuation);
+				}
 			}
 		}
 		else
@@ -370,7 +403,7 @@ void CPURaytracer::CreateTasks(std::vector<CPUTraceTask>& tasks)
 
 	for (size_t i = 0; i < mesh->surfaces.size(); i++)
 	{
-		if (i % 4096 == 0)
+		if (i % 1024 == 0)
 			printf("\rGathering surface trace tasks: %llu / %llu", i, mesh->surfaces.size());
 
 		Surface* surface = mesh->surfaces[i].get();

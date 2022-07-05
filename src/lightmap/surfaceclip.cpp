@@ -13,6 +13,11 @@ inline bool PointBeyondSide(const vec2& p, const vec2& v1, const vec2& v2)
 	return (p2.y - v1.y) * (v2.x - v1.x) + (v1.x - p2.x) * (v2.y - v1.y) < 0;
 }
 
+inline vec2 LineNormal(const vec2& v1, const vec2& v2)
+{
+	return normalize(vec2(-(v2.y - v1.y), v2.x - v1.x));
+}
+
 SurfaceClip::SurfaceClip(Surface* surface)
 {
 	sampleWidth = float(surface->lightmapDims[0]);
@@ -30,7 +35,7 @@ SurfaceClip::SurfaceClip(Surface* surface)
 	base[7] = surface->plane.b;
 	base[8] = surface->plane.c;
 
-	mat3 inverseProjection = mat3::inverse(base);
+	inverseProjection = mat3::inverse(base);
 
 	// Transform vertices to XY and triangulate
 	vertices.reserve(surface->verts.size());
@@ -105,6 +110,11 @@ bool SurfaceClip::PointInBounds(const vec2& p, float tolerance) const
 }
 
 
+bool SurfaceClip::WorldPositionInBounds(const vec3& p) const
+{
+	return PointInBounds((inverseProjection * p).xy(), 0.0f);
+}
+
 bool SurfaceClip::SampleIsInBounds(float x, float y) const
 {
 	return PointInBounds(vec2((x / float(sampleWidth)) * boundsWidth + bounds.min.x + offsetW, (y / float(sampleHeight)) * boundsHeight + bounds.min.y + offsetH), tolerance);
@@ -112,8 +122,48 @@ bool SurfaceClip::SampleIsInBounds(float x, float y) const
 
 vec2 SurfaceClip::MoveSampleOriginToSurfaceBounds(float x, float y) const
 {
+	return { x, y };
 	vec2 p = vec2((x / float(sampleWidth)) * boundsWidth + bounds.min.x + offsetW, (y / float(sampleHeight)) * boundsHeight + bounds.min.y + offsetH);
 
+	for(std::size_t tries = 1024; tries; --tries)
+	//while(true)
+	{
+		std::vector<std::pair<int, int>> badLines;
+
+		for (size_t i = 1; i < vertices.size(); ++i)
+		{
+			if (!PointOnSide(p, vertices[i - 1], vertices[i], tolerance * 0.5))
+			{
+				badLines.push_back({i - 1, i});
+			}
+		}
+
+		if (!PointOnSide(p, vertices[vertices.size() - 1], vertices[0], tolerance * 0.5))
+		{
+			badLines.push_back({vertices.size() - 1, 0});
+		}
+
+		// Handle various cases
+
+		//printf("%d\n", badLines.size());
+
+		vec2 newPos = p;
+
+		if (badLines.empty())
+		{
+			break;
+		}
+		else
+		{
+			for(const auto &e : badLines)
+				newPos += LineNormal(vertices[e.first], vertices[e.second]) * (tolerance / 256.f);
+		}
+
+		if (PointInBounds(newPos, tolerance))
+		{
+			p = newPos;
+		}
+	}
 
 	const vec2 taskPos = vec2((p.x - bounds.min.x - offsetW) * sampleWidth / boundsWidth, (p.y - bounds.min.y - offsetH) * sampleHeight / boundsHeight);
 
