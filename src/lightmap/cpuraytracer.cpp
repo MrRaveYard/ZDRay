@@ -233,7 +233,7 @@ void CPURaytracer::RunLightTrace(CPUTraceState& state)
 		float attenuation = 0.0f;
 		if (state.PassType == 0 && surface)
 		{
-			//if (dot(normal, state.SunDir) > 0.0f)
+			if (dot(normal, state.SunDir) > 0.0f)
 			{
 				vec3 e0 = normalize(cross(normal, std::abs(normal.x) < std::abs(normal.y) ? vec3(1.0f, 0.0f, 0.0f) : vec3(0.0f, 1.0f, 0.0f)));
 				vec3 e1 = cross(normal, e0);
@@ -250,40 +250,25 @@ void CPURaytracer::RunLightTrace(CPUTraceState& state)
 
 					if (surfaceClip.WorldPositionInBounds(origin2))
 					{
-					//again:;
 						samples++;
 
-						//vec3 start = origin2;
-						//vec3 end = start + state.SunDir * dist;
-						//LevelTraceHit hit = Trace(start, end);
-						//if (hit.fraction < 1.0f && hit.hitSurface->bSky)
+						vec3 start = origin2;
+						vec3 end = start + state.SunDir * dist;
+						LevelTraceHit hit = Trace(start, end);
+						if (hit.fraction < 1.0f && hit.hitSurface->bSky)
 							attenuation += 1.0f;
 					}
 				}
 
-				if (samples == 0)
+				if (samples > 0)
 				{
-					attenuation = 0.0;
-
-					incoming += vec3(1.0f, 0.0, 1.0f);
-				}
-				else if (samples == 1)
-				{
-					attenuation = 0.0;
-
-					incoming += vec3(0.0f, 0.0, 1.0f);
-				}
-				else if (samples < state.SampleCount / 2)
-				{
-					attenuation = 0.0;
-
-					incoming += vec3(0.0f, 1.0, 0.0f);
+					attenuation *= 1.0f / float(samples);
+					incoming += state.SunColor * (attenuation * state.SunIntensity * incomingAttenuation);
 				}
 				else
 				{
-					incoming += vec3(float(samples) / float(state.SampleCount));
-					//attenuation *= 1.0f / float(samples);
-					//incoming += state.SunColor * (attenuation * state.SunIntensity * incomingAttenuation);
+					//incoming = vec3(1.0f, 0.0, 1.0f);
+					incoming = -vec3(100.0f, 100.0f, 100.0f);
 				}
 			}
 		}

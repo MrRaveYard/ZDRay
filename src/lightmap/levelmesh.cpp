@@ -310,10 +310,86 @@ void LevelMesh::CreateTextures()
 
 	RectPacker packer(textureWidth, textureHeight, RectPacker::Spacing(0));
 
+	std::size_t fixed = 0;
+
 	for (Surface* surf : sortedSurfaces)
 	{
+		// Floodfill invalid pixels
+		auto pixels = surf->samples.data();
+		auto width = surf->lightmapDims[0];
+		auto height = surf->lightmapDims[1];
+
+		auto getPixel = [&](int x, int y) {
+			if (x < 0 || x >= width || y < 0 || y >= height)
+			{
+				return vec3(-1);
+			}
+
+			return pixels[y * width + x];
+		};
+
+		auto getNeighbour = [&](int x, int y) {
+
+			auto a = getPixel(x - 1, y - 1);
+			auto b = getPixel(x, y - 1);
+			auto c = getPixel(x + 1, y - 1);
+			auto d = getPixel(x - 1, y);
+			auto e = getPixel(x, y);
+			auto f = getPixel(x + 1, y);
+			auto g = getPixel(x - 1, y + 1);
+			auto h = getPixel(x, y + 1);
+			auto j = getPixel(x + 1, y + 1);
+
+			if (a.x >= 0) return a;
+			if (b.x >= 0) return b;
+			if (c.x >= 0) return c;
+			if (d.x >= 0) return d;
+			if (f.x >= 0) return f;
+			if (g.x >= 0) return g;
+			if (h.x >= 0) return h;
+			if (j.x >= 0) return j;
+
+			if (e.x >= 0) return e;
+
+			return e;
+		};
+
+		bool found;
+
+		std::vector<vec3> data;
+
+		data.resize(width * height);
+
+		do {
+			found = false;
+
+			for (int y = 0; y < height; ++y)
+			{
+				for (int x = 0; x < width; ++x)
+				{
+					if (getPixel(x, y).x < 0)
+					{
+						found = true;
+						data[y * width + x] = getNeighbour(x, y);
+						fixed++;
+					}
+					else
+					{
+						data[y * width + x] = pixels[(y * width + x)];
+					}
+				}
+			}
+
+			for (size_t i = 0; i < data.size(); ++i)
+			{
+				pixels[i] = data[i];
+			}
+		} while (found);
+
 		FinishSurface(packer, surf);
 	}
+
+	printf("Manually fixed %llu pixels\n", fixed);
 }
 
 void LevelMesh::FinishSurface(RectPacker& packer, Surface* surface)
