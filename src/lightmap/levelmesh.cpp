@@ -446,6 +446,149 @@ void LevelMesh::CreateLightProbes(FLevel& map)
 	}
 }
 
+class SideSurfaceBuilder
+{
+	FLevel& doomMap;
+	IntSideDef* side;
+	IntSector* front;
+	IntSector* back;
+	FloatVertex v1;
+	FloatVertex v2;
+	float distance;
+	int typeIndex;
+	int defaultSamples;
+
+	void AddVertices(float v1Bottom, float v2Bottom, float v1Top, float v2Top)
+	{
+		surf->numVerts = 4;
+		surf->verts.resize(4);
+		surf->verts[0].x = surf->verts[2].x = v1.x;
+		surf->verts[0].y = surf->verts[2].y = v1.y;
+		surf->verts[1].x = surf->verts[3].x = v2.x;
+		surf->verts[1].y = surf->verts[3].y = v2.y;
+		surf->verts[0].z = v1Bottom;
+		surf->verts[1].z = v2Bottom;
+		surf->verts[2].z = v1Top;
+		surf->verts[3].z = v2Top;
+
+		surf->plane.SetNormal(surf->verts[0], surf->verts[1], surf->verts[2], surf->verts[3]);
+		surf->plane.SetDistance(surf->verts[0]);
+	}
+public:
+	std::unique_ptr<Surface> surf;
+
+	SideSurfaceBuilder(FLevel& doomMap, IntSideDef* side, int defaultSamples) : doomMap(doomMap), side(side), defaultSamples(defaultSamples), surf(std::make_unique<Surface>())
+	{
+		front = doomMap.GetFrontSector(side);
+		back = doomMap.GetBackSector(side);
+
+		v1 = doomMap.GetSegVertex(side->line->v1);
+		v2 = doomMap.GetSegVertex(side->line->v2);
+
+		if (side->line->sidenum[0] != (ptrdiff_t)(side - &doomMap.Sides[0]))
+		{
+			std::swap(v1, v2);
+		}
+
+		distance = length(vec2(v2.x - v1.x, v2.y - v1.y));
+		typeIndex = side - &doomMap.Sides[0];
+	}
+
+	SideSurfaceBuilder& MakeLineHorizont(float v1Bottom, float v2Bottom, float v1Top, float v2Top)
+	{
+		surf->type = ST_MIDDLESIDE;
+		surf->typeIndex = typeIndex;
+
+		AddVertices(v1Bottom, v2Bottom, v1Top, v2Top);
+
+		surf->sampleDimension = (surf->sampleDimension = side->GetSampleDistanceMiddle()) ? surf->sampleDimension : defaultSamples;
+
+		return *this;
+	}
+
+	SideSurfaceBuilder& Make3dFloorWall(float v1Bottom, float v2Bottom, float v1Top, float v2Top)
+	{
+		IntSideDef* otherSide = &doomMap.Sides[side->line->sidenum[0]] == side ? &doomMap.Sides[side->line->sidenum[1]] : &doomMap.Sides[side->line->sidenum[0]];
+
+		surf->type = ST_MIDDLESIDE;
+		surf->typeIndex = typeIndex;
+
+		std::swap(v1, v2);
+		AddVertices(v1Bottom, v2Bottom, v1Top, v2Top);
+
+		surf->sampleDimension = (surf->sampleDimension = otherSide->GetSampleDistanceMiddle()) ? surf->sampleDimension : defaultSamples;
+
+		return *this;
+	}
+
+	SideSurfaceBuilder& MakeBottomSeg(float v1Bottom, float v2Bottom, float v1BottomBack, float v2BottomBack)
+	{
+		surf->type = ST_LOWERSIDE;
+		surf->typeIndex = typeIndex;
+
+		AddVertices(v1Bottom, v2Bottom, v1BottomBack, v2BottomBack);
+
+		surf->sampleDimension = (surf->sampleDimension = side->GetSampleDistanceBottom()) ? surf->sampleDimension : defaultSamples;
+
+		return *this;
+	}
+
+	SideSurfaceBuilder& MakeTopSeg(float v1TopBack, float v2TopBack, float v1Top, float v2Top)
+	{
+		surf->type = ST_UPPERSIDE;
+		surf->typeIndex = typeIndex;
+
+		AddVertices(v1TopBack, v2TopBack, v1Top, v2Top);
+
+		surf->sampleDimension = (surf->sampleDimension = side->GetSampleDistanceTop()) ? surf->sampleDimension : defaultSamples;
+
+		return *this;
+	}
+
+	SideSurfaceBuilder& MakeMidSeg(float v1Bottom, float v2Bottom, float v1Top, float v2Top)
+	{
+		surf->type = ST_MIDDLESIDE;
+		surf->typeIndex = typeIndex;
+
+		AddVertices(v1Bottom, v2Bottom, v1Top, v2Top);
+
+		surf->sampleDimension = (surf->sampleDimension = side->GetSampleDistanceMiddle()) ? surf->sampleDimension : defaultSamples;
+
+		return *this;
+	}
+
+	SideSurfaceBuilder& SetMaterial(std::string material, bool isSky)
+	{
+		surf->material = std::move(material);
+		surf->bSky = isSky;
+
+		{
+			float texWidth = 128.0f;
+			float texHeight = 128.0f;
+
+			float texZ = surf->verts[0].z;
+
+			surf->uvs.resize(4);
+			surf->uvs[0].x = 0.0f;
+			surf->uvs[1].x = distance / texWidth;
+			surf->uvs[2].x = 0.0f;
+			surf->uvs[3].x = distance / texWidth;
+			surf->uvs[0].y = (surf->verts[0].z - texZ) / texHeight;
+			surf->uvs[1].y = (surf->verts[1].z - texZ) / texHeight;
+			surf->uvs[2].y = (surf->verts[2].z - texZ) / texHeight;
+			surf->uvs[3].y = (surf->verts[3].z - texZ) / texHeight;
+		}
+
+		return *this;
+	}
+
+	SideSurfaceBuilder& SetControlSector(IntSector* controlSector)
+	{
+		surf->controlSector = controlSector;
+		return *this;
+	}
+};
+
 void LevelMesh::CreateSideSurfaces(FLevel &doomMap, IntSideDef *side)
 {
 	IntSector *front;
@@ -472,50 +615,16 @@ void LevelMesh::CreateSideSurfaces(FLevel &doomMap, IntSideDef *side)
 
 	int typeIndex = side - &doomMap.Sides[0];
 
-	vec2 dx(v2.x - v1.x, v2.y - v1.y);
-	float distance = length(dx);
-
 	// line_horizont consumes everything
 	if (side->line->special == Line_Horizon && front != back)
 	{
-		float texWidth = 128.0f;
-		float texHeight = 128.0f;
+		SideSurfaceBuilder ssb(doomMap, side, defaultSamples);
 
-		auto surf = std::make_unique<Surface>();
-		surf->material = side->midtexture;
-		surf->numVerts = 4;
-		surf->verts.resize(4);
-		surf->bSky = front->skyFloor || front->skyCeiling;
+		ssb.MakeLineHorizont(v1Bottom, v2Bottom, v1Top, v2Top)
+			.SetMaterial(side->midtexture, front->skyFloor || front->skyCeiling)
+			.SetControlSector(nullptr);
 
-		surf->verts[0].x = surf->verts[2].x = v1.x;
-		surf->verts[0].y = surf->verts[2].y = v1.y;
-		surf->verts[1].x = surf->verts[3].x = v2.x;
-		surf->verts[1].y = surf->verts[3].y = v2.y;
-		surf->verts[0].z = v1Bottom;
-		surf->verts[1].z = v2Bottom;
-		surf->verts[2].z = v1Top;
-		surf->verts[3].z = v2Top;
-
-		surf->plane.SetNormal(surf->verts[0], surf->verts[1], surf->verts[2], surf->verts[3]);
-		surf->plane.SetDistance(surf->verts[0]);
-		surf->type = ST_MIDDLESIDE;
-		surf->typeIndex = typeIndex;
-		surf->controlSector = nullptr;
-		surf->sampleDimension = (surf->sampleDimension = side->GetSampleDistanceMiddle()) ? surf->sampleDimension : defaultSamples;
-
-		float texZ = surf->verts[0].z;
-
-		surf->uvs.resize(4);
-		surf->uvs[0].x = 0.0f;
-		surf->uvs[1].x = distance / texWidth;
-		surf->uvs[2].x = 0.0f;
-		surf->uvs[3].x = distance / texWidth;
-		surf->uvs[0].y = (surf->verts[0].z - texZ) / texHeight;
-		surf->uvs[1].y = (surf->verts[1].z - texZ) / texHeight;
-		surf->uvs[2].y = (surf->verts[2].z - texZ) / texHeight;
-		surf->uvs[3].y = (surf->verts[3].z - texZ) / texHeight;
-
-		surfaces.push_back(std::move(surf));
+		surfaces.push_back(std::move(ssb.surf));
 		return;
 	}
 
@@ -538,43 +647,12 @@ void LevelMesh::CreateSideSurfaces(FLevel &doomMap, IntSideDef *side)
 			if (bothSides)
 				continue;
 
-			float texWidth = 128.0f;
-			float texHeight = 128.0f;
+			SideSurfaceBuilder ssb(doomMap, side, defaultSamples);
+			ssb.Make3dFloorWall(xfloor->floorplane.zAt(v2.x, v2.y), xfloor->floorplane.zAt(v1.x, v1.y), xfloor->ceilingplane.zAt(v2.x, v2.y), xfloor->ceilingplane.zAt(v1.x, v1.y))
+				.SetMaterial("texture", false)
+				.SetControlSector(xfloor);
 
-			IntSideDef* otherSide = &doomMap.Sides[side->line->sidenum[0]] == side ? &doomMap.Sides[side->line->sidenum[1]] : &doomMap.Sides[side->line->sidenum[0]];
-
-			auto surf = std::make_unique<Surface>();
-			surf->material = "texture";
-			surf->type = ST_MIDDLESIDE;
-			surf->typeIndex = typeIndex;
-			surf->controlSector = xfloor;
-			surf->sampleDimension = (surf->sampleDimension = otherSide->GetSampleDistanceMiddle()) ? surf->sampleDimension : defaultSamples;
-			surf->numVerts = 4;
-			surf->verts.resize(4);
-			surf->verts[0].x = surf->verts[2].x = v2.x;
-			surf->verts[0].y = surf->verts[2].y = v2.y;
-			surf->verts[1].x = surf->verts[3].x = v1.x;
-			surf->verts[1].y = surf->verts[3].y = v1.y;
-			surf->verts[0].z = xfloor->floorplane.zAt(v2.x, v2.y);
-			surf->verts[1].z = xfloor->floorplane.zAt(v1.x, v1.y);
-			surf->verts[2].z = xfloor->ceilingplane.zAt(v2.x, v2.y);
-			surf->verts[3].z = xfloor->ceilingplane.zAt(v1.x, v1.y);
-			surf->plane.SetNormal(surf->verts[0], surf->verts[1], surf->verts[2], surf->verts[3]);
-			surf->plane.SetDistance(surf->verts[0]);
-
-			float texZ = surf->verts[0].z;
-
-			surf->uvs.resize(4);
-			surf->uvs[0].x = 0.0f;
-			surf->uvs[1].x = distance / texWidth;
-			surf->uvs[2].x = 0.0f;
-			surf->uvs[3].x = distance / texWidth;
-			surf->uvs[0].y = (surf->verts[0].z - texZ) / texHeight;
-			surf->uvs[1].y = (surf->verts[1].z - texZ) / texHeight;
-			surf->uvs[2].y = (surf->verts[2].z - texZ) / texHeight;
-			surf->uvs[3].y = (surf->verts[3].z - texZ) / texHeight;
-
-			surfaces.push_back(std::move(surf));
+			surfaces.push_back(std::move(ssb.surf));
 		}
 
 		float v1TopBack = back->ceilingplane.zAt(v1.x, v1.y);
@@ -602,44 +680,12 @@ void LevelMesh::CreateSideSurfaces(FLevel &doomMap, IntSideDef *side)
 
 			if (side->bottomtexture[0] != '-' || bSky)
 			{
-				float texWidth = 128.0f;
-				float texHeight = 128.0f;
+				SideSurfaceBuilder ssb(doomMap, side, defaultSamples);
+				ssb.MakeBottomSeg(v1Bottom, v2Bottom, v1BottomBack, v2BottomBack)
+					.SetMaterial(side->bottomtexture, bSky)
+					.SetControlSector(nullptr);
 
-				auto surf = std::make_unique<Surface>();
-				surf->material = side->bottomtexture;
-				surf->numVerts = 4;
-				surf->verts.resize(4);
-
-				surf->verts[0].x = surf->verts[2].x = v1.x;
-				surf->verts[0].y = surf->verts[2].y = v1.y;
-				surf->verts[1].x = surf->verts[3].x = v2.x;
-				surf->verts[1].y = surf->verts[3].y = v2.y;
-				surf->verts[0].z = v1Bottom;
-				surf->verts[1].z = v2Bottom;
-				surf->verts[2].z = v1BottomBack;
-				surf->verts[3].z = v2BottomBack;
-
-				surf->plane.SetNormal(surf->verts[0], surf->verts[1], surf->verts[2], surf->verts[3]);
-				surf->plane.SetDistance(surf->verts[0]);
-				surf->type = ST_LOWERSIDE;
-				surf->typeIndex = typeIndex;
-				surf->bSky = bSky;
-				surf->controlSector = nullptr;
-				surf->sampleDimension = (surf->sampleDimension = side->GetSampleDistanceBottom()) ? surf->sampleDimension : defaultSamples;
-
-				float texZ = surf->verts[0].z;
-
-				surf->uvs.resize(4);
-				surf->uvs[0].x = 0.0f;
-				surf->uvs[1].x = distance / texWidth;
-				surf->uvs[2].x = 0.0f;
-				surf->uvs[3].x = distance / texWidth;
-				surf->uvs[0].y = (surf->verts[0].z - texZ) / texHeight;
-				surf->uvs[1].y = (surf->verts[1].z - texZ) / texHeight;
-				surf->uvs[2].y = (surf->verts[2].z - texZ) / texHeight;
-				surf->uvs[3].y = (surf->verts[3].z - texZ) / texHeight;
-
-				surfaces.push_back(std::move(surf));
+				surfaces.push_back(std::move(ssb.surf));
 			}
 
 			v1Bottom = v1BottomBack;
@@ -661,44 +707,12 @@ void LevelMesh::CreateSideSurfaces(FLevel &doomMap, IntSideDef *side)
 
 			if (side->toptexture[0] != '-' || bSky)
 			{
-				float texWidth = 128.0f;
-				float texHeight = 128.0f;
+				SideSurfaceBuilder ssb(doomMap, side, defaultSamples);
+				ssb.MakeTopSeg(v1TopBack, v2TopBack, v1Top, v2Top)
+					.SetMaterial(side->toptexture, bSky)
+					.SetControlSector(nullptr);
 
-				auto surf = std::make_unique<Surface>();
-				surf->material = side->toptexture;
-				surf->numVerts = 4;
-				surf->verts.resize(4);
-
-				surf->verts[0].x = surf->verts[2].x = v1.x;
-				surf->verts[0].y = surf->verts[2].y = v1.y;
-				surf->verts[1].x = surf->verts[3].x = v2.x;
-				surf->verts[1].y = surf->verts[3].y = v2.y;
-				surf->verts[0].z = v1TopBack;
-				surf->verts[1].z = v2TopBack;
-				surf->verts[2].z = v1Top;
-				surf->verts[3].z = v2Top;
-
-				surf->plane.SetNormal(surf->verts[0], surf->verts[1], surf->verts[2], surf->verts[3]);
-				surf->plane.SetDistance(surf->verts[0]);
-				surf->type = ST_UPPERSIDE;
-				surf->typeIndex = typeIndex;
-				surf->bSky = bSky;
-				surf->controlSector = nullptr;
-				surf->sampleDimension = (surf->sampleDimension = side->GetSampleDistanceTop()) ? surf->sampleDimension : defaultSamples;
-
-				float texZ = surf->verts[0].z;
-
-				surf->uvs.resize(4);
-				surf->uvs[0].x = 0.0f;
-				surf->uvs[1].x = distance / texWidth;
-				surf->uvs[2].x = 0.0f;
-				surf->uvs[3].x = distance / texWidth;
-				surf->uvs[0].y = (surf->verts[0].z - texZ) / texHeight;
-				surf->uvs[1].y = (surf->verts[1].z - texZ) / texHeight;
-				surf->uvs[2].y = (surf->verts[2].z - texZ) / texHeight;
-				surf->uvs[3].y = (surf->verts[3].z - texZ) / texHeight;
-
-				surfaces.push_back(std::move(surf));
+				surfaces.push_back(std::move(ssb.surf));
 			}
 
 			v1Top = v1TopBack;
@@ -709,43 +723,12 @@ void LevelMesh::CreateSideSurfaces(FLevel &doomMap, IntSideDef *side)
 	// middle seg
 	if (back == nullptr)
 	{
-		float texWidth = 128.0f;
-		float texHeight = 128.0f;
+		SideSurfaceBuilder ssb(doomMap, side, defaultSamples);
+		ssb.MakeMidSeg(v1Bottom, v2Bottom, v1Top, v2Top)
+			.SetMaterial(side->midtexture, false)
+			.SetControlSector(nullptr);
 
-		auto surf = std::make_unique<Surface>();
-		surf->material = side->midtexture;
-		surf->numVerts = 4;
-		surf->verts.resize(4);
-
-		surf->verts[0].x = surf->verts[2].x = v1.x;
-		surf->verts[0].y = surf->verts[2].y = v1.y;
-		surf->verts[1].x = surf->verts[3].x = v2.x;
-		surf->verts[1].y = surf->verts[3].y = v2.y;
-		surf->verts[0].z = v1Bottom;
-		surf->verts[1].z = v2Bottom;
-		surf->verts[2].z = v1Top;
-		surf->verts[3].z = v2Top;
-
-		surf->plane.SetNormal(surf->verts[0], surf->verts[1], surf->verts[2], surf->verts[3]);
-		surf->plane.SetDistance(surf->verts[0]);
-		surf->type = ST_MIDDLESIDE;
-		surf->typeIndex = typeIndex;
-		surf->controlSector = nullptr;
-		surf->sampleDimension = (surf->sampleDimension = side->GetSampleDistanceMiddle()) ? surf->sampleDimension : defaultSamples;
-
-		float texZ = surf->verts[0].z;
-
-		surf->uvs.resize(4);
-		surf->uvs[0].x = 0.0f;
-		surf->uvs[1].x = distance / texWidth;
-		surf->uvs[2].x = 0.0f;
-		surf->uvs[3].x = distance / texWidth;
-		surf->uvs[0].y = (surf->verts[0].z - texZ) / texHeight;
-		surf->uvs[1].y = (surf->verts[1].z - texZ) / texHeight;
-		surf->uvs[2].y = (surf->verts[2].z - texZ) / texHeight;
-		surf->uvs[3].y = (surf->verts[3].z - texZ) / texHeight;
-
-		surfaces.push_back(std::move(surf));
+		surfaces.push_back(std::move(ssb.surf));
 	}
 }
 
